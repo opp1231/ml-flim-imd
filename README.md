@@ -92,7 +92,7 @@ Name | Description | Usage | Default
 --version | Predict lifetimes using a single (version=1) or double (version=2) decay model | "--version 2" | 1
 --start_t | Which timepoint to be considered the start of the timeseries | "--start_t 2" | 1
 --end_t | Which timepoint to be considered the end of the timeseries | "--end_t 200" | -1 (process all timepoints after the start)
---channel | Which channel to process (if two channels exist, channel=0 corresponds to 561 and channel=1 corresponds to 488) | "--channel 1" | 0 
+--channel | Which channel to process (if two channels exist, channel=0 corresponds to 552 and channel=1 corresponds to 488) | "--channel 1" | 0 
 
 If the value of any argument does not deviate from the default, it can be omitted from the command.
   
@@ -118,7 +118,7 @@ Name | Description | Usage | Default
 --start_t | Which timepoint to be considered the start of the timeseries | "--start_t 2" | 1
 --end_t | Which timepoint to be considered the end of the timeseries | "--end_t 200" | -1 (process all timepoints after the start)
 --int_sat | Percent of max intensity which defines saturation | "--int_sat 99.85" | 100.0
---channel | Which channel to process (if two channels exist, channel=0 corresponds to 561 and channel=1 corresponds to 488) | "--channel 1" | 0 
+--channel | Which channel to process (if two channels exist, channel=0 corresponds to 552 and channel=1 corresponds to 488) | "--channel 1" | 0 
 --cmap | Colorcet colormap for intensity-modulated display of lifetime | "--cmap bmy" | rainbow4
 --project | Run the sum-projection of intensity | "-p" | False
 --destripe | Run the wavelet-based destriping of intensity | "-ds" | False
