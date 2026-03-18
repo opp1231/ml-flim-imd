@@ -541,7 +541,9 @@ if __name__ == '__main__':
                 else:
                     print(f'Running sum projection anyways to facility IMD...')
 
-                    data_clean = project_and_save(times=times,ddir=ddir,save_dir=save_dir,nz=nz,destripe=args.destripe)
+                    data_clean = project_and_save(times=times,ddir=ddir,save_dir=save_dir,sig=gauss_sig,
+                                            sigmay=sigmay,sigmax=sigmax,noise_level=noise_lvl,
+                                            nz=nz,nt=nt,destripe=args.destripe)
 
             if not args.norm:
 
