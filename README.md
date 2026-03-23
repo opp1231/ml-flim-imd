@@ -33,7 +33,7 @@ which conda
 
 If conda is not found, install it. We recommend [miniforge](https://github.com/conda-forge/miniforge), following the OS requirements where relevant (Unix for the cluster). 
 
-Clone this reponsitory into your local directory by running
+Clone this reponsitory into your nrs directory by running
 ```
 git clone https://github.com/opp1231/ml-flim-imd
 ```
