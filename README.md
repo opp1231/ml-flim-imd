@@ -17,6 +17,13 @@ Implementation of ML prediction of fluorescence lifetime, destriping, and intens
 
 ## Installation
 
+#### To login to the Janelia LSF cluster
+```
+ssh username@login1.int.janelia.org
+```
+or login2 if login1 is offline for maintenance
+
+####
 These instructions pertain to running the pipeline on the Janelia compute cluster. The instructions are similar for local use, simply omit the "bsub" commands where relevant. If installing on the cluster, wait for completion emails at each step before proceeding.
 
 Verify conda install
@@ -24,7 +31,7 @@ Verify conda install
 which conda
 ```
 
-If conda is not found, install it. We recommend [miniforge](https://github.com/conda-forge/miniforge), following the OS requirements where relevant (Linux for the cluster). 
+If conda is not found, install it. We recommend [miniforge](https://github.com/conda-forge/miniforge), following the OS requirements where relevant (Unix for the cluster). 
 
 Clone this reponsitory into your local directory by running
 ```
