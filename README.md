@@ -53,7 +53,7 @@ git clone https://github.com/opp1231/ml-flim-imd
   ```
 3. Install relevant packages
   ```
-  bsub -n 1 -W 1:00 "python -m pip install tifffile numpy scipy tensorflow[and-cuda]=2.19"
+  bsub -n 1 -W 1:00 "python -m pip install tifffile numpy scipy tensorflow[and-cuda]==2.19"
   ```
 4. Deactivate environment
   ```
