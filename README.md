@@ -84,7 +84,7 @@ git clone https://github.com/opp1231/ml-flim-imd
 
 #### ML Tau Prediction
   ```
-  bsub -J "EXPERIMENT_NAME_TAU" -W 2:00 -n 4 -gpu "num=1" -q gpu_l4 -o output_%J.txt "python ./src/dlflim_predict.py --arguments"
+  bsub -J "EXPERIMENT_NAME_TAU" -W 2:00 -n 4 -gpu "num=1" -q gpu_l4 -o /nrs/path/to/folder/output_%J.txt "python ./src/dlflim_predict.py --arguments"
   ```
   The command-line arguments are passed to the  as follows:
 
