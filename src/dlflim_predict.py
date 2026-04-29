@@ -271,7 +271,7 @@ if __name__ == '__main__':
         dt_max = 0.2046
         dt_irf = 0.0186
 
-        ddir = f'/nrs/aic/Owen/I2/FLIM_Data/ML_Models/irf/IRF_561nm_700steps_18p6psStepSize_20nsWidth_20251014_135341'
+        ddir = f'/nrs/schreiter/2026_HelenFarrants/ML_Models/irf/IRF_561nm_700steps_18p6psStepSize_20nsWidth_20251014_135341'
 
         print('Loading IRFs....')
 
