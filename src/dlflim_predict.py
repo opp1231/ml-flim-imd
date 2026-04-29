@@ -10,6 +10,8 @@ from tensorflow.keras.layers import Activation, BatchNormalization, Input, Conv2
 from pathlib import Path
 import tifffile as tff
 from scipy.signal import savgol_filter
+from skimage.filters import gaussian, median
+from skimage.morphology import disk
 from scipy.interpolate import interp1d
 import warnings
 
@@ -59,6 +61,23 @@ def uncubify(arr, oldshape):
     tmpshape = np.concatenate([repeats, newshape])
     order = np.arange(len(tmpshape)).reshape(2, -1).ravel(order='F')
     return arr.reshape(tmpshape).transpose(order).reshape(oldshape)
+
+def tfcubify(arr, newshape):
+    oldshape = np.array(arr.shape)
+    repeats = (oldshape / newshape).astype(int)
+    tmpshape = np.column_stack([repeats, newshape]).ravel()
+    order = np.arange(len(tmpshape))
+    order = np.concatenate([order[::2], order[1::2]])
+    return tf.reshape(tf.transpose(tf.reshape(arr,tmpshape),order),np.hstack([-1,np.array(newshape)]))
+
+def tfuncubify(arr, oldshape):
+    N, newshape = tf.shape(arr).numpy()[0], tf.shape(arr).numpy()[1:]
+    # oldshape = np.array(oldshape)    
+    repeats = (oldshape / newshape).astype(int)
+    tmpshape = np.concatenate([repeats, newshape])
+    order = np.arange(len(tmpshape)).reshape(2, -1).ravel(order='F')
+
+    return tf.reshape(tf.transpose(tf.reshape(arr,tmpshape),order),oldshape)
 
 def input_flim_vol(file_path,nt,nz,sz_x=512,sz_y=512):
     A = np.fromfile(file_path,dtype='int16',sep="")
@@ -227,7 +246,6 @@ if __name__ == '__main__':
     if check_gpu():
 
         args = parse_args()
-        # model_dir = f'/nrs/Owen/I2/FLIM_Data/ML_Models'
         model_dir = args.inpath_model
 
         version = args.version
@@ -253,6 +271,23 @@ if __name__ == '__main__':
         dt_max = 0.2046
         dt_irf = 0.0186
 
+        ddir = f'/nrs/aic/Owen/I2/FLIM_Data/ML_Models/irf/IRF_561nm_700steps_18p6psStepSize_20nsWidth_20251014_135341'
+
+        print('Loading IRFs....')
+
+        nT = 700
+        ch1 = f'SPC00_TM00000_ANG000_CHN00_PH0.stack'
+        irfs = input_flim_vol(os.path.join(ddir,ch1),nT,21)
+        mean_irf = np.mean(irfs,axis=1)
+        avg_irf = mean_irf[:,:int(mean_irf.shape[1]/2),:]
+        irf_end = np.mean(avg_irf[-3:,...],axis=0)
+        avg_irf = np.clip(avg_irf - irf_end,a_min=0.0,a_max=np.inf)
+
+        avg_irf1 = savgol_filter(avg_irf,51,3,axis=0)
+        id_start = 250
+        grad = np.argmin(np.gradient(np.gradient(avg_irf1,axis=0),axis=0)[id_start:,...],axis=0)+id_start
+        grad_test_old = np.median(grad.flatten())
+
         ddir = args.inpath_irf
 
         ch1 = f'SPC00_TM00000_ANG000_CHN00_PH0.stack'
@@ -260,14 +295,38 @@ if __name__ == '__main__':
         irfs = input_flim_vol(os.path.join(ddir,ch1),gates,21)
         avg_irf = np.mean(irfs[:,1:,...],axis=1)
 
+        avg_irf2 = savgol_filter(avg_irf,51,3,axis=0)
+        id_start = 250
+        grad_new = np.argmin(np.gradient(np.gradient(avg_irf2,axis=0),axis=0)[id_start:,...],axis=0)+id_start
+        grad_test_new = np.median(grad_new.flatten())
+
+        shift = np.round(grad_test_new - grad_test_old).astype(np.int64)
+
         irf_test = np.copy(avg_irf)
-        irf_end = np.mean(irf_test[-3:,:,:],axis=0)
-        irf_test = np.clip(irf_test - np.mean(irf_test[-3:,:,:],axis=0),a_min=1e-6,a_max=None)
-        irf_test = np.pad(irf_test,pad_width=((0,int((orig_step_size*orig_nt-dt_irf*avg_irf.shape[0])/dt_irf)),(0,0),(0,0)),mode='edge')
+        irf_test1 = np.clip(irf_test,a_min=1e-6,a_max=None)
+        irf_test = np.pad(irf_test,pad_width=((0,np.round((orig_step_size*orig_nt-dt_irf*avg_irf.shape[0])/dt_irf).astype(np.int64)),(0,0),(0,0)),mode='edge')
+        avg_irf2 = savgol_filter(irf_test,51,3,axis=0)
+        id_start = 250
+        grad_irf_test = np.argmin(np.gradient(np.gradient(avg_irf2,axis=0),axis=0)[id_start:,...],axis=0)+id_start
+        idx = np.round(median(grad_irf_test,disk(2)) - np.amin(median(grad_irf_test,disk(2)))).astype(np.int64)
+
+        irf_test_reshaped = np.reshape(irf_test,(irf_test.shape[0],irf_test.shape[1]*irf_test.shape[2]))
+
+        idx_reshaped = np.reshape(idx,(idx.shape[0]*idx.shape[1])) + shift
+
+        ids = np.clip(idx_reshaped[:, np.newaxis] + np.arange(gates+np.round((orig_step_size*orig_nt-dt_irf*avg_irf.shape[0])/dt_irf).astype(np.int64)),a_min=0,a_max=irf_test.shape[0]-1)
+        x = np.moveaxis(irf_test_reshaped,0,1)
+        x = np.take_along_axis(x,ids.astype(np.int64),axis=1)
+        x = np.moveaxis(x,1,0)
+
+        irf_test = np.reshape(x,(x.shape[0],irf_test.shape[1],irf_test.shape[2]))
+
         interpolator = interp1d(np.linspace(0,irf_test.shape[0]-1,irf_test.shape[0]),irf_test,kind='slinear', fill_value="extrapolate",axis=0)
         irf_test = interpolator(np.linspace(0,irf_test.shape[0]-1,nTG))
-        irf_test = irf_test[:nTG,...]
-        irf_test = np.divide(irf_test,np.amax(irf_test,axis=0))
+        irf_test = np.divide(irf_test,np.amax(irf_test,axis=0),np.zeros_like(irf_test),where=np.amax(irf_test,axis=0)>0)
+
+        irf_test = tf.cast(tf.convert_to_tensor(irf_test),tf.float32)
+        tpsf_irf = tfcubify(irf_test,np.array((nTG,xX,yY)))
 
         ddirs = [args.inpath]
 
@@ -279,6 +338,7 @@ if __name__ == '__main__':
             else:
                 times = [f for f in os.listdir(ddir) if re.search(r'ANG000_CHN00',f)]
             times = times[args.start_t:args.end_t]
+            print(len(times))
             os.makedirs(os.path.join(ddir,'taus_cnn'),exist_ok=True)
             save_dir = os.path.join(ddir,'taus_cnn')
 
@@ -290,89 +350,98 @@ if __name__ == '__main__':
 
                 im = input_flim_vol(os.path.join(ddir,time),nt=nt,nz=nz)
 
-                im = np.clip(im - irf_end,a_min=0.0,a_max=None)
-
-                if i==0:
-                    if args.version == 1:
-                        taus = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
-                    elif args.version == 2:
-                        taus_1P = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
-                        taus_2P = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
-                        taus_RP = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
-                        taus_M = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
-
-                mask = np.ones((im.shape[1],im.shape[2],im.shape[3]))
+                if args.version == 1:
+                    taus = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
+                elif args.version == 2:
+                    taus_1P = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
+                    taus_2P = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
+                    taus_RP = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
+                    taus_M = np.zeros((len(times),im.shape[1],im.shape[2],im.shape[3]))
 
                 for j in range(im.shape[1]):
 
-                    t = np.arange(gates+int((step_size*nt-dt_irf*avg_irf.shape[0])/dt_irf))*dt_irf
-                    im_slice = im[np.arange(nt)*step_size <= t[-1],int(j),:,:]
+                    print(j)
 
-                    if version == 1:
+                    im_slice = im[:,int(j),...]
 
-                        im1 = savgol_filter(im_slice,5,3,axis=0)
+                    im2 = np.clip(savgol_filter(im_slice,5,3,axis=0),a_min=5e-5,a_max=np.inf)
 
-                    elif version == 2:
+                    mask = np.sum(im2,axis=0) < 10
 
-                        im1 = savgol_filter(im_slice,5,3,axis=0)
+                    im2[:,mask] = 0.0
 
-                    im2 = np.copy(im1)
+                    im4 = np.divide(im2,np.amax(im2,axis=0),np.zeros(im2.shape,float),where=np.amax(im2,axis=0)>0.0)
 
-                    im3 = np.divide(im2,np.amax(im2,axis=0),np.zeros(im2.shape,float),where=np.amax(im2,axis=0)>0.0)
-                    im4 = np.copy(im3)
+                    x = tf.convert_to_tensor(im4)
+                    x = tf.reshape(x,[im4.shape[0],im4.shape[1]*im4.shape[2]])
+                    
+                    t = np.arange(gates+np.round((orig_step_size*orig_nt-dt_irf*avg_irf.shape[0])/dt_irf).astype(np.int64))*dt_irf
+                    new_step = step_size
+                    if tf.shape(x).numpy()[0]*new_step < orig_nt*orig_step_size:
+                        for k in range(np.ceil((orig_step_size*orig_nt-step_size*tf.shape(x).numpy()[0])/step_size).astype(int)):
+                            x = tf.pad(x,tf.constant([[0,1],[0,0]]),mode='CONSTANT', constant_values=0.0)
+                    x = x[...,tf.newaxis]
+                    x = tf.image.resize(x,[np.round((step_size*x.shape[0])/dt_irf).astype(np.int64),x.shape[1]])
+                    if x.shape[0] < irf_test_reshaped.shape[0]:
+                        x = tf.pad(x,tf.constant([[0,irf_test_reshaped.shape[0]-x.shape[0]-1],[0,0],[0,0]]),mode='CONSTANT', constant_values=0.0)
 
-                    temp = mask[int(j),:,:]
-                    im4[:,~(temp>0)] = 0.0
+                    new_step = dt_irf
+                    if new_step*tf.shape(x).numpy()[0] > np.amax(t):
+                        ids = np.clip(idx_reshaped[:, np.newaxis] + np.arange(gates+np.floor((orig_step_size*orig_nt-dt_irf*avg_irf.shape[0])/dt_irf)),a_min=0, a_max=x.shape[0]-1)
+                    x = tf.keras.ops.moveaxis(x,0,1)
+                    x = tf.keras.ops.take_along_axis(x,ids[...,np.newaxis],axis=1)
+                    x = tf.keras.ops.moveaxis(x,1,0)
+                    
+                    if new_step*tf.shape(x).numpy()[0] > np.amax(t):
+                        idd = np.where(np.arange(tf.shape(x).numpy()[0])*new_step <= t[-1])[0][-1]
+                        x = x[:idd,...]
 
-                    interpolator = interp1d(np.linspace(0,im4.shape[0]-1,im4.shape[0]),im4,kind='slinear', fill_value="extrapolate",axis=0)
-                    new_temp = interpolator(np.linspace(0,im4.shape[0]-1,nTG))
-                    tpsfT = np.ndarray(
-                            (1, nTG, new_temp.shape[1], new_temp.shape[2], int(1)), dtype=np.float32
-                            )
-                    tpsfT[0,:,:,:,0] = new_temp
+                    x = tf.image.resize(x,[nTG,im4.shape[1]*im4.shape[2]],antialias=True)
 
-                    tpsfT_test_new = cubify(tpsfT[0,...,0],np.array((nTG,xX,yY)))
-                    tpsf_irf = cubify(irf_test,np.array((nTG,xX,yY)))
+                    x = tf.reshape(x,[nTG,im4.shape[1],im4.shape[2]])
 
-                    test_arr = np.stack((np.moveaxis(tpsfT_test_new,1,-1),np.moveaxis(tpsf_irf,1,-1)),axis=-1)
+                    tpsfT_test_new = tfcubify(x,np.array((nTG,xX,yY)))
+
+                    test_arr = tf.stack([tf.keras.ops.moveaxis(tpsfT_test_new,1,-1),tf.keras.ops.moveaxis(tpsf_irf,1,-1)],axis=-1)
 
                     if args.version == 1:
                         t2P = model.predict(tf.convert_to_tensor(test_arr))
 
                         t2P = t2P['imgT2']
 
-                        t2P_image = uncubify(t2P,(im.shape[2],im.shape[3],1))
+                        t2P_image = tfuncubify(t2P,(im.shape[2],im.shape[3],1))
 
-                        taus[int(i),int(j),...] = t2P_image[:,:,0]
+                        taus[int(i),int(j),...] = t2P_image[:,:,0].numpy()
 
                     elif args.version == 2:
                         
                         testV = model.predict(tf.convert_to_tensor(test_arr))
                         t1P = testV['imgT1'] # Predicted t1 values
-                        t1P_image = uncubify(t1P,(im.shape[2],im.shape[3],1))
+                        t1P_image = tfuncubify(t1P,(im.shape[2],im.shape[3],1))
                         t2P = testV['imgT2'] # Predicted t2 values
-                        t2P_image = uncubify(t2P,(im.shape[2],im.shape[3],1))
+                        t2P_image = tfuncubify(t2P,(im.shape[2],im.shape[3],1))
                         tRP = testV['imgTR'] # Predicted AR values
-                        tRP_image = uncubify(tRP,(im.shape[2],im.shape[3],1))
+                        tRP_image = tfuncubify(tRP,(im.shape[2],im.shape[3],1))
 
-                        taus_1P[int(i),int(j),...] = t1P_image[:,:,0]
-                        taus_2P[int(i),int(j),...] = t2P_image[:,:,0]
-                        taus_RP[int(i),int(j),...] = tRP_image[:,:,0]
-                        taus_M[int(i),int(j),...] = (tRP_image*t1P_image + (np.ones_like(tRP_image) - tRP_image)*t2P_image)[:,:,0]
+                        taus_1P[int(i),int(j),...] = t1P_image[:,:,0].numpy()
+                        taus_2P[int(i),int(j),...] = t2P_image[:,:,0].numpy()
+                        taus_RP[int(i),int(j),...] = tRP_image[:,:,0].numpy()
+                        taus_M[int(i),int(j),...] = (tRP_image*t1P_image + (1.0 - tRP_image)*t2P_image)[:,:,0]
+
 
                     else:
                         exit(f'error: version should be either 1 or 2')
 
-            if args.version == 1:            
-                tff.imwrite(os.path.join(save_dir,'taus.tif'),taus,metadata={'axes': 'TZYX'})
+                if args.version == 1:            
+                    tff.imwrite(os.path.join(save_dir,'taus.tif'),taus,metadata={'axes': 'TZYX'})
 
-            elif args.version == 2:            
-                tff.imwrite(os.path.join(save_dir,'taus_1P.tif'),taus_1P,metadata={'axes': 'TZYX'})
-                tff.imwrite(os.path.join(save_dir,'taus_2P.tif'),taus_2P,metadata={'axes': 'TZYX'})
-                tff.imwrite(os.path.join(save_dir,'taus_RP.tif'),taus_RP,metadata={'axes': 'TZYX'})
-                tff.imwrite(os.path.join(save_dir,'taus_M.tif'),taus_M,metadata={'axes': 'TZYX'})
-            else:
-                exit(f'error: version should be either 1 or 2')
+                elif args.version == 2:            
+                    tff.imwrite(os.path.join(save_dir,'taus_1P.tif'),taus_1P,metadata={'axes': 'TZYX'})
+                    tff.imwrite(os.path.join(save_dir,'taus_2P.tif'),taus_2P,metadata={'axes': 'TZYX'})
+                    tff.imwrite(os.path.join(save_dir,'taus_RP.tif'),taus_RP,metadata={'axes': 'TZYX'})
+                    tff.imwrite(os.path.join(save_dir,'taus_M.tif'),taus_M,metadata={'axes': 'TZYX'})
+                else:
+                    exit(f'error: version should be either 1 or 2')
 
     
 
